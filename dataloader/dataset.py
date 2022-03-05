@@ -311,7 +311,11 @@ class spherical_dataset(data.Dataset):
 
         # random instance augmentation
         if self.instance_aug:
+            # import time
+            # t1 = time.time()
             xyz,labels,insts,feat = self.inst_aug.instance_aug(xyz,labels.squeeze(),insts.squeeze(),feat)
+            # t2 = time.time()
+            # print("t:",t2-t1)
         
         # convert coordinate into polar coordinates
         xyz_pol = cart2polar(xyz)
