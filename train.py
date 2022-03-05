@@ -43,16 +43,18 @@ def load_pretrained_model(model,pretrained_model):
     return model
 
 def main(args):
-    if args.launcher == 'none':
+    if args.launcher == None:
         distributed = False
+        args.local_rank = 0
     else:
         distributed = True
         init_dist(args.launcher)
+        args.local_rank = torch.distributed.get_rank() #slurm 无法通过args获得rank
 
     with open(args.configs, 'r') as s:
         new_args = yaml.safe_load(s)
     args_dict = merge_configs(args,new_args)
-    args.local_rank = torch.distributed.get_rank() #slurm 无法通过args获得rank
+    
 
     data_path = args_dict['dataset']['path']
     train_batch_size = args_dict['model']['train_batch_size']
@@ -110,7 +112,7 @@ def main(args):
     
     train_pt_dataset = SemKITTI(data_path + '/sequences/', imageset = 'train', return_ref = True, instance_pkl_path=args_dict['dataset']['instance_pkl_path'])       
     if args_dict['model']['polar']:
-        train_dataset=spherical_dataset(train_pt_dataset, args_dict['dataset'], use_aug = True, grid_size = grid_size, ignore_label = 0)
+        train_dataset=spherical_dataset(train_pt_dataset, args_dict['dataset'], use_aug = False, grid_size = grid_size, ignore_label = 0)
     if distributed:
         train_sampler = torch.utils.data.distributed.DistributedSampler(train_dataset)
     else:
@@ -221,19 +223,41 @@ def main(args):
             pbar = tqdm(total=len(train_dataset_loader))
         for i_iter,(train_vox_fea,train_label_tensor,train_gt_center,train_gt_offset,train_grid,_,_,train_pt_fea) in enumerate(train_dataset_loader):
             # training
-            try:
-                train_vox_fea_ten = train_vox_fea.cuda()
-                train_label_tensor = SemKITTI2train(train_label_tensor)
-                train_pt_fea_ten = [torch.from_numpy(i).type(torch.FloatTensor).cuda() for i in train_pt_fea]
-                train_grid_ten = [torch.from_numpy(i[:,:2]).cuda() for i in train_grid]
-                train_label_tensor=train_label_tensor.type(torch.LongTensor).cuda()
-                train_gt_center_tensor = train_gt_center.cuda()
-                train_gt_offset_tensor = train_gt_offset.cuda()
 
-                if args_dict['model']['enable_SAP'] and epoch>=args_dict['model']['SAP']['start_epoch']:
-                    for fea in train_pt_fea_ten:
-                        fea.requires_grad_()
-        
+            # try:
+            train_vox_fea_ten = train_vox_fea.cuda()
+            train_label_tensor = SemKITTI2train(train_label_tensor)
+            train_pt_fea_ten = [torch.from_numpy(i).type(torch.FloatTensor).cuda() for i in train_pt_fea]
+            train_grid_ten = [torch.from_numpy(i[:,:2]).cuda() for i in train_grid]
+            train_label_tensor=train_label_tensor.type(torch.LongTensor).cuda()
+            train_gt_center_tensor = train_gt_center.cuda()
+            train_gt_offset_tensor = train_gt_offset.cuda()
+
+            if args_dict['model']['enable_SAP'] and epoch>=args_dict['model']['SAP']['start_epoch']:
+                for fea in train_pt_fea_ten:
+                    fea.requires_grad_()
+    
+            # forward
+            if visibility:
+                sem_prediction,center,offset = my_model(train_pt_fea_ten,train_grid_ten,train_vox_fea_ten)
+            else:
+                sem_prediction,center,offset = my_model(train_pt_fea_ten,train_grid_ten)
+            # loss
+            loss = loss_fn(sem_prediction,center,offset,train_label_tensor,train_gt_center_tensor,train_gt_offset_tensor)
+            
+            
+            # self adversarial pruning
+            if args_dict['model']['enable_SAP'] and epoch>=args_dict['model']['SAP']['start_epoch']:
+                loss.backward()
+                for i,fea in enumerate(train_pt_fea_ten):
+                    fea_grad = torch.norm(fea.grad,dim=1)
+                    top_k_grad, _ = torch.topk(fea_grad, int(args_dict['model']['SAP']['rate']*fea_grad.shape[0]))
+                    # delete high influential points
+                    train_pt_fea_ten[i] = train_pt_fea_ten[i][fea_grad < top_k_grad[-1]]
+                    train_grid_ten[i] = train_grid_ten[i][fea_grad < top_k_grad[-1]]
+                optimizer.zero_grad()
+
+                # second pass
                 # forward
                 if visibility:
                     sem_prediction,center,offset = my_model(train_pt_fea_ten,train_grid_ten,train_vox_fea_ten)
@@ -242,34 +266,13 @@ def main(args):
                 # loss
                 loss = loss_fn(sem_prediction,center,offset,train_label_tensor,train_gt_center_tensor,train_gt_offset_tensor)
                 
-                
-                # self adversarial pruning
-                if args_dict['model']['enable_SAP'] and epoch>=args_dict['model']['SAP']['start_epoch']:
-                    loss.backward()
-                    for i,fea in enumerate(train_pt_fea_ten):
-                        fea_grad = torch.norm(fea.grad,dim=1)
-                        top_k_grad, _ = torch.topk(fea_grad, int(args_dict['model']['SAP']['rate']*fea_grad.shape[0]))
-                        # delete high influential points
-                        train_pt_fea_ten[i] = train_pt_fea_ten[i][fea_grad < top_k_grad[-1]]
-                        train_grid_ten[i] = train_grid_ten[i][fea_grad < top_k_grad[-1]]
-                    optimizer.zero_grad()
-
-                    # second pass
-                    # forward
-                    if visibility:
-                        sem_prediction,center,offset = my_model(train_pt_fea_ten,train_grid_ten,train_vox_fea_ten)
-                    else:
-                        sem_prediction,center,offset = my_model(train_pt_fea_ten,train_grid_ten)
-                    # loss
-                    loss = loss_fn(sem_prediction,center,offset,train_label_tensor,train_gt_center_tensor,train_gt_offset_tensor)
-                    
-                # backward + optimize
-                loss.backward()
-                optimizer.step()
-            except Exception as error: 
-                if exce_counter == 0:
-                    print(error)
-                exce_counter += 1
+            # backward + optimize
+            loss.backward()
+            optimizer.step()
+            # except Exception as error: 
+            # if exce_counter == 0:
+            #     print(error)
+            # exce_counter += 1
             
             # zero the parameter gradients
             optimizer.zero_grad()

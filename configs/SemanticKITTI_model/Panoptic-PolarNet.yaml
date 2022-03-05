@@ -4,7 +4,7 @@ dataset:
     name: semantickitti
     path: data
     output_path: out/SemKITTI
-    instance_pkl_path: data_ins
+    instance_pkl_path: data #data_ins
     rotate_aug: True
     flip_aug: True
     inst_aug: True
