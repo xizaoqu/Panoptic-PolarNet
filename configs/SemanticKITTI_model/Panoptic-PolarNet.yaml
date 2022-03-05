@@ -3,7 +3,7 @@ model_name: Panoptic_PolarNet
 dataset:
     name: semantickitti
     path: data
-    output_path: out/SemKITTI
+    output_path: output/SemKITTI
     instance_pkl_path: data_ins
     rotate_aug: True
     flip_aug: True
@@ -17,7 +17,7 @@ dataset:
     grid_size: [480,360,32]
 
 model:
-    model_save_path: ./Panoptic_SemKITTI.pt
+    model_save_path: output/Panoptic_SemKITTI.pt
     pretrained_model: /pretrained_weight/Panoptic_SemKITTI_PolarNet.pt
     polar: True
     visibility: True
