@@ -133,97 +133,98 @@ def main(args):
     my_model.train()
     global_iter = 0
     exce_counter = 0
-    evaluator = PanopticEval(len(unique_label)+1, None, [0], min_points=50)
+
 
     while epoch < args_dict['model']['max_epoch']:
         # validation
-        my_model.eval()
-        evaluator.reset()
-        if args.local_rank == 0:
-            print('*'*80)
-            print('Test network performance on validation split')
-            print('*'*80)
-            pbar = tqdm(total=len(val_dataset_loader))
-        time_list = []
-        pp_time_list = []
-        with torch.no_grad():
-            for i_iter_val,(val_vox_fea,val_vox_label,val_gt_center,val_gt_offset,val_grid,val_pt_labels,val_pt_ints,val_pt_fea) in enumerate(val_dataset_loader):
-                val_vox_fea_ten = val_vox_fea.cuda()
-                val_vox_label = SemKITTI2train(val_vox_label)
-                val_pt_fea_ten = [torch.from_numpy(i).type(torch.FloatTensor).cuda() for i in val_pt_fea]
-                val_grid_ten = [torch.from_numpy(i[:,:2]).cuda() for i in val_grid]
-                val_label_tensor=val_vox_label.type(torch.LongTensor).cuda()
-                val_gt_center_tensor = val_gt_center.cuda()
-                val_gt_offset_tensor = val_gt_offset.cuda()
+        if True:
+            my_model.eval()
+            evaluator = PanopticEval(len(unique_label)+1, None, [0], min_points=50)
+            #evaluator.reset()
+            if args.local_rank == 0:
+                print('*'*80)
+                print('Test network performance on validation split')
+                print('*'*80)
+                pbar = tqdm(total=len(val_dataset_loader))
+            time_list = []
+            pp_time_list = []
+            with torch.no_grad():
+                for i_iter_val,(val_vox_fea,val_vox_label,val_gt_center,val_gt_offset,val_grid,val_pt_labels,val_pt_ints,val_pt_fea) in enumerate(val_dataset_loader):
+                    val_vox_fea_ten = val_vox_fea.cuda()
+                    val_vox_label = SemKITTI2train(val_vox_label)
+                    val_pt_fea_ten = [torch.from_numpy(i).type(torch.FloatTensor).cuda() for i in val_pt_fea]
+                    val_grid_ten = [torch.from_numpy(i[:,:2]).cuda() for i in val_grid]
+                    val_label_tensor=val_vox_label.type(torch.LongTensor).cuda()
+                    val_gt_center_tensor = val_gt_center.cuda()
+                    val_gt_offset_tensor = val_gt_offset.cuda()
 
-                torch.cuda.synchronize()
-                start_time = time.time()
-                if visibility:            
-                    predict_labels,center,offset = my_model(val_pt_fea_ten, val_grid_ten, val_vox_fea_ten)
-                else:
-                    predict_labels,center,offset = my_model(val_pt_fea_ten, val_grid_ten)
-                torch.cuda.synchronize()
-                time_list.append(time.time()-start_time)
-
-                for count,i_val_grid in enumerate(val_grid):
-                    # get foreground_mask
-                    for_mask = torch.zeros(1,grid_size[0],grid_size[1],grid_size[2],dtype=torch.bool).cuda()
-                    for_mask[0,val_grid[count][:,0],val_grid[count][:,1],val_grid[count][:,2]] = True
-                    # post processing
                     torch.cuda.synchronize()
                     start_time = time.time()
-                    panoptic_labels,center_points = get_panoptic_segmentation(torch.unsqueeze(predict_labels[count], 0),torch.unsqueeze(center[count], 0),torch.unsqueeze(offset[count], 0),val_pt_dataset.thing_list,\
-                                                                            threshold=args_dict['model']['post_proc']['threshold'], nms_kernel=args_dict['model']['post_proc']['nms_kernel'],\
-                                                                            top_k=args_dict['model']['post_proc']['top_k'], polar=circular_padding,foreground_mask=for_mask)
+                    if visibility:            
+                        predict_labels,center,offset = my_model(val_pt_fea_ten, val_grid_ten, val_vox_fea_ten)
+                    else:
+                        predict_labels,center,offset = my_model(val_pt_fea_ten, val_grid_ten)
                     torch.cuda.synchronize()
-                    pp_time_list.append(time.time()-start_time)
-                    panoptic_labels = panoptic_labels.cpu().detach().numpy().astype(np.uint32)
-                    panoptic = panoptic_labels[0,val_grid[count][:,0],val_grid[count][:,1],val_grid[count][:,2]]
+                    time_list.append(time.time()-start_time)
 
-                    evaluator.addBatch(panoptic & 0xFFFF,panoptic,np.squeeze(val_pt_labels[count]),np.squeeze(val_pt_ints[count]))
-                del val_vox_label,val_pt_fea_ten,val_label_tensor,val_grid_ten,val_gt_center,val_gt_center_tensor,val_gt_offset,val_gt_offset_tensor,predict_labels,center,offset,panoptic_labels,center_points
-                if args.local_rank == 0:
-                    pbar.update(1)
-        
-        if distributed:
-            tmp_dir = os.path.join('output', 'tmp')
-            if not os.path.exists(tmp_dir):
-                os.makedirs(tmp_dir, exist_ok=True)
-            evaluator = common_utils.merge_evaluator(evaluator, tmp_dir)
-            torch.distributed.barrier() #同步GPU
-        if args.local_rank == 0:
-            class_PQ, class_SQ, class_RQ, class_all_PQ, class_all_SQ, class_all_RQ = evaluator.getPQ()
-            miou,ious = evaluator.getSemIoU()
-            if best_val_PQ<class_PQ:
-                best_val_PQ=class_PQ
-                torch.save(my_model.state_dict(), model_save_path)
+                    for count,i_val_grid in enumerate(val_grid):
+                        # get foreground_mask
+                        for_mask = torch.zeros(1,grid_size[0],grid_size[1],grid_size[2],dtype=torch.bool).cuda()
+                        for_mask[0,val_grid[count][:,0],val_grid[count][:,1],val_grid[count][:,2]] = True
+                        # post processing
+                        torch.cuda.synchronize()
+                        start_time = time.time()
+                        panoptic_labels,center_points = get_panoptic_segmentation(torch.unsqueeze(predict_labels[count], 0),torch.unsqueeze(center[count], 0),torch.unsqueeze(offset[count], 0),val_pt_dataset.thing_list,\
+                                                                                threshold=args_dict['model']['post_proc']['threshold'], nms_kernel=args_dict['model']['post_proc']['nms_kernel'],\
+                                                                                top_k=args_dict['model']['post_proc']['top_k'], polar=circular_padding,foreground_mask=for_mask)
+                        torch.cuda.synchronize()
+                        pp_time_list.append(time.time()-start_time)
+                        panoptic_labels = panoptic_labels.cpu().detach().numpy().astype(np.uint32)
+                        panoptic = panoptic_labels[0,val_grid[count][:,0],val_grid[count][:,1],val_grid[count][:,2]]
 
-            print('Validation per class PQ, SQ, RQ and IoU: ')
-            for class_name, class_pq, class_sq, class_rq, class_iou in zip(unique_label_str,class_all_PQ[1:],class_all_SQ[1:],class_all_RQ[1:],ious[1:]):
-                print('%15s : %6.2f%%  %6.2f%%  %6.2f%%  %6.2f%%' % (class_name, class_pq*100, class_sq*100, class_rq*100, class_iou*100))
+                        evaluator.addBatch(panoptic & 0xFFFF,panoptic,np.squeeze(val_pt_labels[count]),np.squeeze(val_pt_ints[count]))
+                    del val_vox_label,val_pt_fea_ten,val_label_tensor,val_grid_ten,val_gt_center,val_gt_center_tensor,val_gt_offset,val_gt_offset_tensor,predict_labels,center,offset,panoptic_labels,center_points
+                    if args.local_rank == 0:
+                        pbar.update(1)
+            
+            if distributed:
+                tmp_dir = os.path.join('output', 'tmp')
+                if not os.path.exists(tmp_dir):
+                    os.makedirs(tmp_dir, exist_ok=True)
+                evaluator = common_utils.merge_evaluator(evaluator, tmp_dir)
+                torch.distributed.barrier() #同步GPU
             if args.local_rank == 0:
-                pbar.close()
-            print('Current val PQ is %.3f' %
-                (class_PQ*100))               
-            print('Current val miou is %.3f'%
-                (miou*100))
-            print('Inference time per %d is %.4f seconds\n, postprocessing time is %.4f seconds per scan' %
-                (val_batch_size,np.mean(time_list),np.mean(pp_time_list)))
+                class_PQ, class_SQ, class_RQ, class_all_PQ, class_all_SQ, class_all_RQ = evaluator.getPQ()
+                miou,ious = evaluator.getSemIoU()
+                if best_val_PQ<class_PQ:
+                    best_val_PQ=class_PQ
+                    torch.save(my_model.state_dict(), model_save_path)
 
-            if start_training:
-                sem_l ,hm_l, os_l = np.mean(loss_fn.lost_dict['semantic_loss']), np.mean(loss_fn.lost_dict['heatmap_loss']), np.mean(loss_fn.lost_dict['offset_loss'])
-                print('epoch %d iter %5d, loss: %.3f, semantic loss: %.3f, heatmap loss: %.3f, offset loss: %.3f\n' %
-                    (epoch, i_iter, sem_l+hm_l+os_l, sem_l, hm_l, os_l))
-            print('%d exceptions encountered during last training\n' %
-                exce_counter)
-            exce_counter = 0
-            loss_fn.reset_loss_dict()
+                print('Validation per class PQ, SQ, RQ and IoU: ')
+                for class_name, class_pq, class_sq, class_rq, class_iou in zip(unique_label_str,class_all_PQ[1:],class_all_SQ[1:],class_all_RQ[1:],ious[1:]):
+                    print('%15s : %6.2f%%  %6.2f%%  %6.2f%%  %6.2f%%' % (class_name, class_pq*100, class_sq*100, class_rq*100, class_iou*100))
+                if args.local_rank == 0:
+                    pbar.close()
+                print('Current val PQ is %.3f' %
+                    (class_PQ*100))               
+                print('Current val miou is %.3f'%
+                    (miou*100))
+                print('Inference time per %d is %.4f seconds\n, postprocessing time is %.4f seconds per scan' %
+                    (val_batch_size,np.mean(time_list),np.mean(pp_time_list)))
+
+                if start_training:
+                    sem_l ,hm_l, os_l = np.mean(loss_fn.lost_dict['semantic_loss']), np.mean(loss_fn.lost_dict['heatmap_loss']), np.mean(loss_fn.lost_dict['offset_loss'])
+                    print('epoch %d iter %5d, loss: %.3f, semantic loss: %.3f, heatmap loss: %.3f, offset loss: %.3f\n' %
+                        (epoch, i_iter, sem_l+hm_l+os_l, sem_l, hm_l, os_l))
+                print('%d exceptions encountered during last training\n' %
+                    exce_counter)
+                exce_counter = 0
+                loss_fn.reset_loss_dict()
 
         if args.local_rank == 0: 
             pbar = tqdm(total=len(train_dataset_loader))
         for i_iter,(train_vox_fea,train_label_tensor,train_gt_center,train_gt_offset,train_grid,_,_,train_pt_fea) in enumerate(train_dataset_loader):
             # training
-
             # try:
             train_vox_fea_ten = train_vox_fea.cuda()
             train_label_tensor = SemKITTI2train(train_label_tensor)
