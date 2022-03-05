@@ -52,6 +52,7 @@ def main(args):
     with open(args.configs, 'r') as s:
         new_args = yaml.safe_load(s)
     args_dict = merge_configs(args,new_args)
+    args.local_rank = torch.distributed.get_rank() #slurm 无法通过args获得rank
 
     data_path = args_dict['dataset']['path']
     train_batch_size = args_dict['model']['train_batch_size']
