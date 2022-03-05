@@ -118,7 +118,8 @@ class SemKITTI(data.Dataset):
 def absoluteFilePaths(directory):
    for dirpath,_,filenames in os.walk(directory):
        for f in filenames:
-           yield os.path.abspath(os.path.join(dirpath, f))
+            if f[-3:] == 'bin':
+                yield os.path.abspath(os.path.join(dirpath, f))
 
 class voxel_dataset(data.Dataset):
   def __init__(self, in_dataset, args, grid_size, ignore_label = 0, return_test = False, fixed_volume_space= True, use_aug = False, max_volume_space = [50,50,1.5], min_volume_space = [-50,-50,-3]):

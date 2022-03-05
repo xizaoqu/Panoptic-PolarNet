@@ -26,6 +26,15 @@ class PanopticEval:
   def num_classes(self):
     return self.n_classes
 
+  def merge(self, evaluator):
+    self.px_iou_conf_matrix += evaluator.px_iou_conf_matrix
+    self.pan_tp += evaluator.pan_tp
+    self.pan_iou += evaluator.pan_iou
+    self.pan_fp += evaluator.pan_fp
+    self.pan_fn += evaluator.pan_fn
+
+    #self.evaluated_fnames += evaluator.evaluated_fnames
+
   def reset(self):
     # general things
     # iou stuff
