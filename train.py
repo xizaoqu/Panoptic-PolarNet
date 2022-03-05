@@ -52,7 +52,6 @@ def main(args):
     with open(args.configs, 'r') as s:
         new_args = yaml.safe_load(s)
     args_dict = merge_configs(args,new_args)
-    args.local_rank = eval(args.local_rank)
 
     data_path = args_dict['dataset']['path']
     train_batch_size = args_dict['model']['train_batch_size']
@@ -289,7 +288,7 @@ if __name__ == '__main__':
     parser.add_argument('-c', '--configs', default='configs/SemanticKITTI_model/Panoptic-PolarNet.yaml')
     parser.add_argument('--pretrained_model', default='empty')
     parser.add_argument('--launcher', default=None)
-    parser.add_argument('--local_rank', default=None)
+    parser.add_argument('--local_rank', type=int, default=None)
 
     args = parser.parse_args()
 
