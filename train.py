@@ -112,7 +112,7 @@ def main(args):
     
     train_pt_dataset = SemKITTI(data_path + '/sequences/', imageset = 'train', return_ref = True, instance_pkl_path=args_dict['dataset']['instance_pkl_path'])       
     if args_dict['model']['polar']:
-        train_dataset=spherical_dataset(train_pt_dataset, args_dict['dataset'], use_aug = False, grid_size = grid_size, ignore_label = 0)
+        train_dataset=spherical_dataset(train_pt_dataset, args_dict['dataset'], use_aug = True, grid_size = grid_size, ignore_label = 0)
     if distributed:
         train_sampler = torch.utils.data.distributed.DistributedSampler(train_dataset)
     else:
